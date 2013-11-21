@@ -1,0 +1,66 @@
+/*
+	Messages for signer communication
+
+	Author: Marek Palatinus <slush@satoshilabs.com>
+
+	Version: 0.1
+*/
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FieldOptions {
+	optional bool binary = 50001;	// message field has binary payload
+}
+
+/*
+	Mapping between Trezor wire identifier (int) and protobuf message
+*/
+enum MessageType {
+	MessageType_Success = 1;
+	MessageType_Failure = 2;
+	MessageType_SignFirmware = 3;
+	MessageType_SignPluginConfig = 4;
+	MessageType_SignedObject = 5;
+}
+
+// ****************************************************************************
+//
+// Definition of custom field types
+//
+
+enum FailureType {
+	Failure_UnexpectedMessage = 1;
+	Failure_ButtonExpected = 2;
+	Failure_SyntaxError = 3;
+	Failure_ActionCancelled = 4;
+}
+
+// ****************************************************************************
+//
+// Basic message
+//
+
+// Response object defining success of the previous request
+message Success {
+	optional bytes message = 1;	// May contain human readable description of the action or request-specific payload
+}
+
+// Response object defining failure of the previous request
+message Failure {
+	optional FailureType code = 1;		// May contain computer-readable definition of the error state
+	optional bytes message = 2;		// May contain human-readable message of the error state
+}
+
+message SignFirmware {
+	optional uint32 slot = 1;
+	optional bytes firmware = 2 [(binary) = true];
+}
+
+message SignPluginConfig {
+	optional bytes config = 1; // JSON representation of plugin config to sign
+	optional bytes protospec = 2; // Current config.proto
+}
+
+message SignedObject {
+	optional bytes payload = 1 [(binary) = true];
+}

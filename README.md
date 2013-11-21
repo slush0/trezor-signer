@@ -1,4 +1,4 @@
 trezor-signer
 =============
 
-RPi signer for firmware/plugin
+This is internal tool and it's not supposed for wider audience. RPi signer for firmware/plugin.

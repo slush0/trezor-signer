@@ -1,0 +1,257 @@
+import smallfonts
+import time
+
+from logo import logo as default_logo
+
+
+class Layout(object):
+    def __init__(self, buffer):
+        self.line_len_normal = 21
+        self.line_len_bold = 16
+        self.buffer = buffer
+        self.update_delta = 0.05
+        self.last_screen = None
+        self.clear()
+
+    def clear(self):
+        self.last_update = time.time()
+        self.scrolls = []
+
+        # Clear the area
+        self.buffer.clear()  # (0, 0, self.buffer.width-1, self.buffer.height-1)
+        self.need_refresh = True
+
+    def update(self):
+        """return proper (is_refresh, is_active) if layout has something to render"""
+
+        t = time.time()
+        if t - self.last_update < self.update_delta:
+            if len(self.scrolls):
+                return True  # No need for rendering, but active
+            else:
+                return False  # Nothing to do
+        self.last_update = t
+
+        if not len(self.scrolls):
+            return False  # Nothing to do
+
+        for item in self.scrolls:
+            (direction, wait, pos_x, y, text, font) = item
+
+            width = len(text) * (font.width + 1)
+
+            if wait:
+                item[1] -= 1
+
+            elif width >= self.buffer.width:
+
+                if pos_x < -width + self.buffer.width + 1 and direction == -1:
+                    item[0] = 1  # Change direction
+                    item[1] = 20  # Set wait cycles
+
+                if pos_x >= 0 and direction == 1:
+                    item[0] = -1  # Change direction
+                    item[1] = 20  # Set wait cycles
+
+                pos_x += direction
+                item[2] = pos_x
+
+                self.need_refresh = True
+
+            self._draw_scroll_text(pos_x, y, text, font)
+
+        return True
+
+    def _draw_scroll_text(self, x, y, text, font):
+        self.buffer.clear(0, y, self.buffer.width - 1, y + font.height)
+        self.buffer.draw_string(x, y, text, font)
+
+    def _scroll_text(self, y, text, font):
+        # direction, x pos delta, pos_y, text, font
+        details = [-1, 30, 0, y, text, font]
+        self._draw_scroll_text(0, y, text, font)
+        self.scrolls.append(details)
+
+    def show_logo(self, logo=None, label=None):
+        self.clear()
+        if logo:
+            self.buffer.draw_bitmap(logo)
+        else:
+            self.buffer.draw_bitmap(default_logo)
+
+        if label:
+            self._show_status(label, '', '')
+
+        self.need_refresh = True
+        self.last_screen = 'show_logo'
+
+    def show_message(self, messages):
+        # Print message to console
+        self.show_question(messages, '', 'Continue }', '')
+        self.last_screen = 'show_message'
+
+    def show_receiving_address(self, address):
+        self.show_message(
+            # .....................
+            ['This address can be',
+             'safely used for',
+             'receiving new funds:'])
+        self._scroll_text(28, address, smallfonts.Font5x8)
+        self.last_screen = 'show_receiving_address'
+
+    def show_question(self, messages, question, yes_text, no_text):
+        # Print message to console
+        print '-' * len(' '.join(messages))
+        print ' '.join(messages)
+        if question:
+            print question, ' (y/n)'
+
+        self.clear()
+        font = smallfonts.Font5x8
+
+        for i in range(len(messages)):
+            msg = messages[i]
+            self.buffer.draw_string(0, i * font.height + 1, msg, font)
+
+        self._show_status(question, yes_text, no_text)
+        self.need_refresh = True
+        self.last_screen = 'show_question'
+
+    def show_question_dummy(self):
+        self.show_question(
+            # .....................
+            ['Tohle je nejaka',
+             'zprava, kterou chci',
+             'uzivateli zobrazi na',
+             'internim displeji',
+             'internim displeji'],
+            'Question?', 'Confirm', 'Cancel')
+        self.last_screen = 'show_question_dummy'
+
+    '''
+    def show_pin_request(self):
+        self.show_question(
+            ["Please write your",
+             "PIN code to",
+             "the computer"],
+            '', '', '{ Cancel')
+        self.last_screen = 'show_pin_request'
+    '''
+
+    def show_pin_backoff_progress(self, current, maximum):
+        # TODO: Specific text or icon
+        self.show_progress(current, maximum, True, default_logo)
+
+    def show_progress(self, current, maximum, clear=False, logo=None):
+        if clear:
+            self.clear()
+            if logo:
+                self.show_logo(logo)
+
+            self.buffer.clear(0, self.buffer.height - 11, self.buffer.width - 1, self.buffer.height - 1)
+            self.buffer.frame(0, self.buffer.height - 10, self.buffer.width - 1, self.buffer.height - 1)
+
+        if current > maximum:
+            current = maximum
+
+        width = int((self.buffer.width - 5) * (current / float(maximum)))
+        self.buffer.box(2, self.buffer.height - 8, width + 2, self.buffer.height - 3)
+        self.need_refresh = True
+        self.last_screen = 'show_progress'
+
+    def show_transactions(self, txes, more=False):
+        self.clear()
+
+        for i in range(len(txes)):
+            tx = txes[i]
+
+            # Write address
+            #self.buffer.draw_string(0, 0, address[:self.line_len_normal], smallfonts.Font5x8)
+            self._scroll_text(i * 22, tx.address, smallfonts.Font5x8)
+
+            # Write amount
+            self.buffer.draw_string(0, i * 22 + 10, self._prepare_amount(tx.amount), smallfonts.Font7x8)
+
+            # Make amount inverted
+            self.buffer.invert(0, i * 22 + 9, self.buffer.width - 1, i * 22 + 17)
+
+        self._show_status('Confirm outputs?', 'More \x7e' if more else 'Confirm }', '{ Cancel')
+        self.need_refresh = True
+        self.last_screen = 'show_transactions'
+
+    def _prepare_amount(self, amount):
+
+        if amount > 21 * 10 ** 14 or amount < 0:
+            return "Invalid amount"
+
+        amount = float(amount) / 10 ** 8  # From satoshis to bitcoins
+        s = ("%.08f" % amount).rstrip('0').rstrip('.')
+        if len(s) <= self.line_len_bold - 4:
+            s = "%s BTC" % s
+        elif len(s) <= self.line_len_bold - 2:
+            s = "%s \x80" % s
+        else:
+            s = "%s \x80" % s[:self.line_len_bold - 2]
+
+        return s.rjust(self.line_len_bold, ' ')
+
+    def _show_status(self, status, yes_text, no_text, invert=False):
+        # Status line
+        if yes_text or no_text:
+            delta = 0
+        else:
+            delta = -10
+
+        self.buffer.clear(0, self.buffer.height - delta - 20, self.buffer.width - 1, self.buffer.height - 1)
+
+        if status != '':
+            pos = self.buffer.width / 2 - len(status) * (smallfonts.Font5x8.width + 1) / 2
+
+            self.buffer.frame(0, self.buffer.height - delta - 20, self.buffer.width - 1, self.buffer.height - delta - 20)
+            self.buffer.draw_string(pos, self.buffer.height - delta - 18, status, smallfonts.Font5x8)
+        else:
+
+            self.buffer.frame(0, self.buffer.height - 12, self.buffer.width - 1, self.buffer.height - 12)
+
+        # Left button title
+        if no_text != '':
+            self.buffer.draw_string(1, self.buffer.height - 9, no_text, smallfonts.Font5x8)
+            self.buffer.invert(0, self.buffer.height - 10, len(no_text) * 6 + 1, self.buffer.height - 1)
+
+        # Right button trange = random.shuffle(range(1, 10)) itle
+        if yes_text != '':
+            self.buffer.draw_string(self.buffer.width - 1 - len(yes_text) * 6, self.buffer.height - 9, yes_text,
+                                    smallfonts.Font5x8)
+            self.buffer.invert(self.buffer.width - 3 - len(yes_text) * 6, self.buffer.height - 10,
+                               self.buffer.width - 1, self.buffer.height - 1)
+
+        if invert:
+            self.buffer.invert(0, self.buffer.height - delta - 20, self.buffer.width - 1, self.buffer.height - 1)
+
+    def show_matrix(self, matrix):
+        '''Renders combination matrix into field of 3x3'''
+
+        box_width = 16
+        box_height = 16
+        font = smallfonts.Font5x8
+        font_margin_x = 6
+        font_margin_y = 5
+
+        left = (self.buffer.width - 3*box_width) / 2
+        top = 5
+
+        def draw_box(num, x, y):
+            self.buffer.draw_string(left+x*box_width+font_margin_x, top+y*box_height+font_margin_y, str(num), font)
+            self.buffer.frame(left+x*box_width, top+y*box_width, left+(x+1)*box_width, top+(y+1)*box_width)
+
+        self.clear()
+        print 'Matrix:'
+        
+        for y in range(3):
+            for x in range(3):
+                print matrix[x+y*3],
+                draw_box(matrix[x+y*3], x, y)
+
+            print
+
+        self.last_screen = 'show_matrix'
